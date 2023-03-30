@@ -14,14 +14,19 @@ import { wethAbi } from "@/constants/abis/WethAbi";
 import { AAFactoryAbi } from "../constants/abis/AAFactoryAbi";
 import { ethers } from "ethers";
 import { sendTx } from "@/scripts/SendTx";
-import { EIP712Signer, types, utils, Wallet } from "zksync-web3";
+import {
+  Contract,
+  EIP712Signer,
+  types,
+  utils,
+  Wallet,
+  Provider,
+  Web3Provider,
+} from "zksync-web3";
 import { AccountAbi } from "@/constants/abis/AccountAbi";
 import { erc20abi } from "../constants/abis/erc20abi";
 
 export default function Home() {
-  const { chainId, account, isWeb3Enabled, web3 } = useMoralis();
-  const chainString = chainId ? parseInt(chainId).toString() : "31337";
-
   const USDC_ADDRESS = "0x0faF6df7054946141266420b43783387A78d82A9";
   const LENDING_ADDRESS = "0xA7c9A38e77290420eD06cf54d27640dE27399eB1";
   const WETH_ADDRESS = "0x20b28B1e4665FFf290650586ad76E977EAb90c5D";
@@ -34,27 +39,28 @@ export default function Home() {
   const ADDRESS_ZERO = ethers.constants.AddressZero;
   const value = ethers.utils.parseEther("0.000001");
 
-  const AA_FACTORY_ADDRESS = "0xEb6D0610064b49d5868703892C3cf5A5AF10544E";
+  const AA_FACTORY_ADDRESS = "0x283E913Ad9cC322D350b88F3BB20dd46dc863585";
   const AA_ABI = AAFactoryAbi;
-
+  const provider = new Provider("https://zksync2-testnet.zksync.dev");
+  const signer = new Web3Provider(window.ethereum).getSigner();
   const { runContractFunction } = useWeb3Contract();
 
   async function handleClick() {
-    const signer = web3.getSigner();
-    const Router = new ethers.Contract(ROUTER_ADDRESS, RouterAbi, signer);
-    const WETH = new ethers.Contract(WETH_ADDRESS, wethAbi, signer);
-    const DAI = new ethers.Contract(DAI_ADDRESS, erc20abi, signer);
-    //  console.log(await signer.getAddress());
+    const Router = new Contract(ROUTER_ADDRESS, RouterAbi, signer);
+    const WETH = new Contract(WETH_ADDRESS, wethAbi, signer);
+    const DAI = new Contract(DAI_ADDRESS, erc20abi, signer);
 
-    const value = ethers.utils.parseEther("0.01");
+    // console.log(await signer.getAddress());
+
+    const value = ethers.utils.parseEther("0.001");
 
     const MAX_APPROVE =
       "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
     const salt = ethers.constants.HashZero;
-    const aaFactory = new ethers.Contract(AA_FACTORY_ADDRESS, AA_ABI, signer);
+    const aaFactory = new Contract(AA_FACTORY_ADDRESS, AA_ABI, signer);
     const owner = await signer.getAddress();
-    //console.log("owner", owner);
+    console.log("owner", owner);
     const abiCoder = new ethers.utils.AbiCoder();
     const accountAddress = utils.create2Address(
       salt,
@@ -63,55 +69,88 @@ export default function Home() {
       AA_FACTORY_ADDRESS
     );
     let aa_address = accountAddress;
-    // console.log(aa_address);
+    console.log(aa_address);
     //0x3861BeF4B47Bc967aD708A5E7cA36B499D422672
 
-    console.log(aa_address, "and", signer);
+    //  console.log(aa_address, "and", signer);
 
     const usdcAmount = ethers.utils.parseUnits("100", 6);
-
-    const USDC = new ethers.Contract(USDC_ADDRESS, erc20abi, signer);
-
-    let tx0 = await USDC.populateTransaction.approve(
+    const user = new Wallet(process.env.PRIVATE_KEY, provider);
+    const USDC = new Contract(USDC_ADDRESS, erc20abi, signer);
+    const accountAA = new Contract(aa_address, AccountAbi, signer);
+    let tx0 = await WETH.populateTransaction.approve(
       LENDING_ADDRESS,
       MAX_APPROVE,
       { value: ethers.utils.parseEther("0") }
     );
     tx0 = {
       ...tx0,
-      from: aa_address,
-      to: USDC_ADDRESS,
+      from: user.address,
+      to: WETH_ADDRESS,
       chainId: 280,
-      nonce: await web3.getTransactionCount(aa_address),
+      type: 113,
+      nonce: await provider.getTransactionCount(user.address),
       customData: {
         gasPerPubdata: utils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
       },
       value: ethers.utils.parseEther("0"),
-      data: USDC.interface.encodeFunctionData("approve", [
-        LENDING_ADDRESS,
-        MAX_APPROVE,
-      ]),
     };
 
-    tx0.gasPrice = await web3.getGasPrice();
-    tx0.gasLimit = await web3.estimateGas(tx0);
+    tx0.gasPrice = await provider.getGasPrice();
+    tx0.gasLimit = await provider.estimateGas(tx0);
 
     console.log("TX 0 is caltulating");
-    console.log(tx0);
+    // console.log(tx0);
 
     const signedTxHash0 = EIP712Signer.getSignedDigest(tx0);
     const signature0 = ethers.utils.arrayify(
-      ethers.utils.joinSignature(signer._signingKey().signDigest(signedTxHash0))
+      ethers.utils.joinSignature(user._signingKey().signDigest(signedTxHash0))
     );
-
-    console.log("TX 0 CALCULATEFD!");
     tx0.customData = {
       ...tx0.customData,
       customSignature: signature0,
     };
+    console.log("TX 1 is caltulating");
+    let tx1 = await WETH.populateTransaction.deposit({ value: value });
 
-    async function checkBalances() {
-      const WethBalance = await web3.getBalance(account);
+    tx1 = {
+      ...tx1,
+      from: user.address,
+      to: WETH_ADDRESS,
+      chainId: 280,
+      type: 113,
+      nonce: await provider.getTransactionCount(user.address),
+      customData: {
+        gasPerPubdata: utils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
+      },
+    };
+
+    tx1.gasPrice = await provider.getGasPrice();
+    tx1.gasLimit = await provider.estimateGas(tx1);
+
+    const signedTxHash = EIP712Signer.getSignedDigest(tx1);
+    const signature = ethers.utils.arrayify(
+      ethers.utils.joinSignature(user._signingKey().signDigest(signedTxHash))
+    );
+
+    console.log("Calculeted tx1");
+
+    tx1.customData = {
+      ...tx1.customData,
+      customSignature: signature,
+    };
+
+    let calls = [utils.serialize(tx0), utils.serialize(tx1)];
+    /*  const response = await accountAA.multicall(calls); // send to account itself
+    const result = await response.wait();
+    console.log("Multicall! HERE: ", result);
+    console.log("Multicall! HERE: ", response);
+ */
+    const tx_ = await provider.sendTransaction(utils.serialize(tx1));
+    await tx_.wait();
+    console.log(tx_);
+    /*  async function checkBalances() {
+      const WethBalance = await provider.getBalance(account);
       const WethBalanceNumber = Number(
         ethers.utils.formatUnits(WethBalance, DAI_DECIMALS)
       );
@@ -123,7 +162,7 @@ export default function Home() {
 
       console.log("DAIBalance: ", DaiBalanceNumber);
       console.log("WETHBalance: ", WethBalanceNumber);
-    }
+    } */
   }
 
   return (
